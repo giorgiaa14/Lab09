@@ -38,7 +38,20 @@ class Model:
             --> Ogni Escursione ha un set di PuntoInteresse.
             --> Ogni PuntoInteresse ha un set di Escursioni.
         """
-        # TODO
+        relazioni = EscursioneDAO.get_escursioni_punti_interesse()
+        if relazioni is None or self.escursioni_map is None or self.punti_interesse_map is None:
+            return
+
+        for rel in relazioni:
+            id_esc = rel["id_escursione"]
+            id_pi = rel["id_punto_interesse"]
+
+            if id_esc in self.escursioni_map and id_pi in self.punti_interesse_map:
+                escursione = self.escursioni_map[id_esc]
+                punto = self.punti_interesse_map[id_pi]
+
+                escursione.punti_interesse.add(punto)
+                punto.escursioni.add(escursione)
 
     def genera_pacchetto(self, id_parco: str, max_giorni: int = None, max_budget: float = None):
         """
@@ -55,7 +68,16 @@ class Model:
         self._costo = 0
         self._valore_ottimo = -1
 
-        # TODO
+        #salvo i vincoli e filtro solo le escursioni del parco selezionato
+        self._max_giorni = max_giorni
+        self._max_budget = max_budget
+        self._escursioni_parco = [
+            e for e in self.escursioni_map.values() if e.id_parco == id_parco
+        ]
+
+        #avvio la ricorsione a partire da 0 con pacchetto vuoto
+        self._ricorsione(0, [], 0, 0.0, 0, set())
+
 
         return self._pacchetto_ottimo, self._costo, self._valore_ottimo
 
@@ -63,3 +85,45 @@ class Model:
         """ Algoritmo di ricorsione che deve trovare il pacchetto che massimizza il voto complessivo dei visitatori"""
 
         # TODO: è possibile cambiare i parametri formali della funzione se ritenuto opportuno
+        #uso schema
+        # A aggiorno l'ottimo se il pacchetto corrente ha un gradimento migliore
+        if valore_corrente > self._valore_ottimo:
+            self._valore_ottimo = valore_corrente
+            self._costo = costo_corrente
+            self._pacchetto_ottimo = pacchetto_parziale.copy()
+
+        #ciclo sulle escursioni rimanenti del parco (evita duplicati e permutazioni)
+        for i in range(start_index, len(self._escursioni_parco)):
+            escursione = self._escursioni_parco[i]
+
+            # C controllo dei vincoli prima di scendere in ricorsione
+            # vincolo giorni (se impostato)
+            if self._max_giorni is not None and durata_corrente + escursione.durata_giorni > self._max_giorni:
+                continue
+
+            # vincolo budget (se impostato)
+            if self._max_budget is not None and costo_corrente + escursione.costo > self._max_budget:
+                continue
+
+            # vincolo punti di interesse unici (nessuna sovrapposizione con punti_usati)
+            if len(punti_usati.intersection(escursione.punti_interesse)) > 0:
+                continue
+
+            #D aggiorno lo stato parziale
+            pacchetto_parziale.append(escursione)
+            punti_usati.update(escursione.punti_interesse)
+            valore_escursione = sum(p.voto_visitatori for p in escursione.punti_interesse)
+
+            # E chiamata ricorsiva passando all'indice successivo
+            self._ricorsione(
+                i + 1,
+                pacchetto_parziale,
+                durata_corrente + escursione.durata_giorni,
+                costo_corrente + escursione.costo,
+                valore_corrente + valore_escursione,
+                punti_usati
+            )
+
+            #  F backtracking: ripristino lista e set allo stato precedente
+            pacchetto_parziale.pop()
+            punti_usati.difference_update(escursione.punti_interesse)
